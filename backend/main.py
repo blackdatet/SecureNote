@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from auth import router as auth_router
 from database import init_db
+from incidents import router as incidents_router
 
 
 @asynccontextmanager
@@ -16,10 +17,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SecureNote API",
     description="Локальный backend приложения SecureNote.",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 app.include_router(auth_router)
+app.include_router(incidents_router)
 
 
 class HealthResponse(BaseModel):
