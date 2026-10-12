@@ -241,6 +241,9 @@ private fun IncidentList(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
+                BackendConnectionCard()
+            }
+            item {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
