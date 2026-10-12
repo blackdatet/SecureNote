@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import ru.mirea.securenote.ui.theme.SecureNoteTheme
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -139,6 +140,7 @@ private fun IncidentJournalScreen(
     var selectedId by rememberSaveable { mutableStateOf<Int?>(null) }
     var editorOpen by rememberSaveable { mutableStateOf(false) }
 
+    val journalStateHolder = rememberSaveableStateHolder()
     val selectedIncident = incidents.firstOrNull { it.id == selectedId }
 
     when {
@@ -166,17 +168,19 @@ private fun IncidentJournalScreen(
         }
 
         else -> {
-            IncidentList(
-                incidents = incidents,
-                onOpen = { id ->
-                    selectedId = id
-                    editorOpen = false
-                },
-                onCreate = {
-                    selectedId = null
-                    editorOpen = true
-                }
-            )
+            journalStateHolder.SaveableStateProvider("journal") {
+                IncidentList(
+                    incidents = incidents,
+                    onOpen = { id ->
+                        selectedId = id
+                        editorOpen = false
+                    },
+                    onCreate = {
+                        selectedId = null
+                        editorOpen = true
+                    }
+                )
+            }
         }
     }
 }
@@ -187,6 +191,35 @@ private fun IncidentList(
     onOpen: (Int) -> Unit,
     onCreate: () -> Unit
 ) {
+    var categoryFilter by rememberSaveable { mutableStateOf("Все") }
+    var severityFilter by rememberSaveable { mutableStateOf("Все") }
+    var statusFilter by rememberSaveable { mutableStateOf("Все") }
+    var showFilters by rememberSaveable { mutableStateOf(false) }
+    var showSummary by rememberSaveable { mutableStateOf(false) }
+
+    val categories = listOf(
+        "Фишинг",
+        "Подозрительный вход",
+        "Утечка данных",
+        "Другое"
+    )
+
+    val filteredIncidents = incidents.filter { incident ->
+        (categoryFilter == "Все" || incident.category == categoryFilter) &&
+                (severityFilter == "Все" || incident.severity == severityFilter) &&
+                (statusFilter == "Все" || incident.status == statusFilter)
+    }
+
+    val closedCount = incidents.count { it.status == "Закрыт" }
+    val openCount = incidents.count {
+        it.status == "Новый" || it.status == "В работе"
+    }
+
+    val filtersActive =
+        categoryFilter != "Все" ||
+                severityFilter != "Все" ||
+                statusFilter != "Все"
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         floatingActionButton = {
@@ -208,7 +241,9 @@ private fun IncidentList(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text(
                         text = "SecureNote",
                         style = MaterialTheme.typography.headlineLarge,
@@ -218,16 +253,6 @@ private fun IncidentList(
                         text = "Журнал инцидентов",
                         style = MaterialTheme.typography.titleMedium
                     )
-                }
-            }
-
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Всего записей: ${incidents.size}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
                     Text(
                         text = "Тестовый режим: записи хранятся в памяти",
                         style = MaterialTheme.typography.bodySmall,
@@ -236,16 +261,152 @@ private fun IncidentList(
                 }
             }
 
-            if (incidents.isEmpty()) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Сводка по всему журналу",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+
+                        Text(
+                            text = "Всего: ${incidents.size}",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+
+                        Text(
+                            text = "Открыто: $openCount · Закрыто: $closedCount",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+
+                        TextButton(
+                            onClick = { showSummary = !showSummary }
+                        ) {
+                            Text(
+                                if (showSummary) "Скрыть категории"
+                                else "Показать по категориям"
+                            )
+                        }
+
+                        if (showSummary) {
+                            categories.forEach { category ->
+                                val count = incidents.count {
+                                    it.category == category
+                                }
+
+                                Text(
+                                    text = "$category: $count",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = { showFilters = !showFilters },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (showFilters) "Скрыть фильтры"
+                        else "Показать фильтры"
+                    )
+                }
+            }
+
+            if (showFilters) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            IncidentChoice(
+                                label = "Категория",
+                                selected = categoryFilter,
+                                options = listOf("Все") + categories,
+                                onSelected = { categoryFilter = it }
+                            )
+
+                            IncidentChoice(
+                                label = "Уровень опасности",
+                                selected = severityFilter,
+                                options = listOf(
+                                    "Все",
+                                    "Низкий",
+                                    "Средний",
+                                    "Высокий"
+                                ),
+                                onSelected = { severityFilter = it }
+                            )
+
+                            IncidentChoice(
+                                label = "Статус",
+                                selected = statusFilter,
+                                options = listOf(
+                                    "Все",
+                                    "Новый",
+                                    "В работе",
+                                    "Закрыт"
+                                ),
+                                onSelected = { statusFilter = it }
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Показано: ${filteredIncidents.size} " +
+                                "из ${incidents.size}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    if (filtersActive) {
+                        Text(
+                            text = "Категория: $categoryFilter\n" +
+                                    "Опасность: $severityFilter\n" +
+                                    "Статус: $statusFilter",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        TextButton(
+                            onClick = {
+                                categoryFilter = "Все"
+                                severityFilter = "Все"
+                                statusFilter = "Все"
+                            }
+                        ) {
+                            Text("Сбросить фильтры")
+                        }
+                    }
+                }
+            }
+
+            if (filteredIncidents.isEmpty()) {
                 item {
                     Text(
-                        text = "Записей пока нет. Добавьте первый инцидент.",
+                        text = if (incidents.isEmpty()) {
+                            "Записей пока нет. Добавьте первый инцидент."
+                        } else {
+                            "По выбранным фильтрам ничего не найдено."
+                        },
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
             }
 
-            items(incidents, key = { it.id }) { incident ->
+            items(filteredIncidents, key = { it.id }) { incident ->
                 Card(
                     onClick = { onOpen(incident.id) },
                     modifier = Modifier.fillMaxWidth()

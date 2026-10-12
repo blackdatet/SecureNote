@@ -173,7 +173,7 @@ fun IncidentForm(
 }
 
 @Composable
-private fun IncidentChoice(
+fun IncidentChoice(
     label: String,
     selected: String,
     options: List<String>,
