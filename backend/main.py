@@ -1,12 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from pydantic import BaseModel
+
+from auth import router as auth_router
+from database import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
 
 
 app = FastAPI(
     title="SecureNote API",
     description="Локальный backend приложения SecureNote.",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
+app.include_router(auth_router)
 
 
 class HealthResponse(BaseModel):
@@ -14,14 +27,7 @@ class HealthResponse(BaseModel):
     service: str
 
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    tags=["Состояние сервера"],
-    summary="Проверка доступности backend",
-)
+@app.get("/health", response_model=HealthResponse,
+         tags=["Состояние сервера"], summary="Проверка доступности backend")
 def health() -> HealthResponse:
-    return HealthResponse(
-        status="ok",
-        service="SecureNote backend",
-    )
+    return HealthResponse(status="ok", service="SecureNote backend")
