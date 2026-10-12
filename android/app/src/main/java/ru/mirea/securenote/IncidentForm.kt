@@ -30,14 +30,30 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun IncidentForm(
+    initialIncident: Incident?,
     onCancel: () -> Unit,
-    onSave: (String, String, String, String) -> Unit
+    onSave: (Incident) -> Unit
 ) {
-    var title by rememberSaveable { mutableStateOf("") }
-    var description by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf("Другое") }
-    var severity by rememberSaveable { mutableStateOf("Низкий") }
-    var attemptedSave by rememberSaveable { mutableStateOf(false) }
+    val editing = initialIncident != null
+
+    var title by rememberSaveable(initialIncident?.id) {
+        mutableStateOf(initialIncident?.title ?: "")
+    }
+    var description by rememberSaveable(initialIncident?.id) {
+        mutableStateOf(initialIncident?.description ?: "")
+    }
+    var category by rememberSaveable(initialIncident?.id) {
+        mutableStateOf(initialIncident?.category ?: "Другое")
+    }
+    var severity by rememberSaveable(initialIncident?.id) {
+        mutableStateOf(initialIncident?.severity ?: "Низкий")
+    }
+    var status by rememberSaveable(initialIncident?.id) {
+        mutableStateOf(initialIncident?.status ?: "Новый")
+    }
+    var attemptedSave by rememberSaveable(initialIncident?.id) {
+        mutableStateOf(false)
+    }
 
     val titleError = attemptedSave && title.isBlank()
     val descriptionError = attemptedSave && description.isBlank()
@@ -59,7 +75,7 @@ fun IncidentForm(
             }
 
             Text(
-                text = "Новый инцидент",
+                text = if (editing) "Редактирование" else "Новый инцидент",
                 style = MaterialTheme.typography.headlineMedium
             )
 
@@ -113,11 +129,20 @@ fun IncidentForm(
                 onSelected = { severity = it }
             )
 
-            Text(
-                text = "Начальный статус: Новый",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (editing) {
+                IncidentChoice(
+                    label = "Статус",
+                    selected = status,
+                    options = listOf("Новый", "В работе", "Закрыт"),
+                    onSelected = { status = it }
+                )
+            } else {
+                Text(
+                    text = "Начальный статус: Новый",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Button(
                 onClick = {
@@ -125,16 +150,23 @@ fun IncidentForm(
 
                     if (title.isNotBlank() && description.isNotBlank()) {
                         onSave(
-                            title.trim(),
-                            description.trim(),
-                            category,
-                            severity
+                            Incident(
+                                id = initialIncident?.id ?: 0,
+                                title = title.trim(),
+                                description = description.trim(),
+                                category = category,
+                                severity = severity,
+                                status = status
+                            )
                         )
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Добавить в журнал")
+                Text(
+                    if (editing) "Сохранить изменения"
+                    else "Добавить в журнал"
+                )
             }
         }
     }
