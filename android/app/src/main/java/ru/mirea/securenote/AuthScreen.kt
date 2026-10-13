@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -27,10 +28,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -105,6 +109,8 @@ fun AuthScreen(viewModel: AuthViewModel) {
 private fun AuthForm(viewModel: AuthViewModel) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val passwordFocus = remember { FocusRequester() }
+    val confirmationFocus = remember { FocusRequester() }
 
     var register by rememberSaveable { mutableStateOf(false) }
     var email by rememberSaveable { mutableStateOf("") }
@@ -134,6 +140,11 @@ private fun AuthForm(viewModel: AuthViewModel) {
 
         localError = null
         viewModel.clearMessage()
+
+        if (email.isBlank() || password.isBlank() || (register && confirmation.isBlank())) {
+            localError = "Заполни все поля."
+            return
+        }
 
         if (register && password != confirmation) {
             localError = "Пароли не совпадают."
@@ -184,7 +195,11 @@ private fun AuthForm(viewModel: AuthViewModel) {
             },
             label = { Text("Email") },
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Email
+                keyboardType = KeyboardType.Email,
+                imeAction = ImeAction.Next
+            ),
+            keyboardActions = KeyboardActions(
+                onNext = { if (!busy) passwordFocus.requestFocus() }
             ),
             singleLine = true,
             enabled = !busy,
@@ -205,7 +220,12 @@ private fun AuthForm(viewModel: AuthViewModel) {
                 PasswordVisualTransformation()
             },
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password
+                keyboardType = KeyboardType.Password,
+                imeAction = if (register) ImeAction.Next else ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+                onNext = { if (!busy && register) confirmationFocus.requestFocus() },
+                onDone = { submit() }
             ),
             trailingIcon = {
                 TextButton(
@@ -217,7 +237,7 @@ private fun AuthForm(viewModel: AuthViewModel) {
             },
             singleLine = true,
             enabled = !busy,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().focusRequester(passwordFocus)
         )
 
         if (register) {
@@ -240,11 +260,13 @@ private fun AuthForm(viewModel: AuthViewModel) {
                     PasswordVisualTransformation()
                 },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done
                 ),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
                 singleLine = true,
                 enabled = !busy,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().focusRequester(confirmationFocus)
             )
         }
 
