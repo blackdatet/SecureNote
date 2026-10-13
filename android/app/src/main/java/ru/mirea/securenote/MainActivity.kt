@@ -60,9 +60,12 @@ class MainActivity : ComponentActivity() {
         val journalViewModel =
             ViewModelProvider(this)[RemoteJournalViewModel::class.java]
 
+        val photoViewModel =
+            ViewModelProvider(this)[IncidentPhotoViewModel::class.java]
+
         setContent {
             SecureNoteTheme {
-                SecureNoteApp(authViewModel, journalViewModel)
+                SecureNoteApp(authViewModel, journalViewModel, photoViewModel)
             }
         }
     }
@@ -112,13 +115,14 @@ private val demoIncidents = listOf(
 @Composable
 private fun SecureNoteApp(
     auth: AuthViewModel,
-    journal: RemoteJournalViewModel
+    journal: RemoteJournalViewModel,
+    photos: IncidentPhotoViewModel
 ) {
     val profile = auth.user
     val token = auth.accessToken
 
     if (profile == null || token == null) {
-        LaunchedEffect(Unit) { journal.clearSession() }
+        LaunchedEffect(Unit) { journal.clearSession(); photos.clearSession() }
         AuthScreen(viewModel = auth)
         return
     }
@@ -145,7 +149,7 @@ private fun SecureNoteApp(
                             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                         ) {
                             Text(profile.email, modifier = Modifier.weight(1f), maxLines = 2)
-                            TextButton(onClick = auth::logout, enabled = !auth.busy && !journal.busy) {
+                            TextButton(onClick = auth::logout, enabled = !auth.busy && !journal.busy && !photos.busy && !photos.cameraPending) {
                                 Text(if (auth.busy) "Выходим…" else "Выйти")
                             }
                         }
@@ -156,7 +160,14 @@ private fun SecureNoteApp(
                 }
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                    IncidentJournalScreen(viewModel = journal, userId = profile.id, sessionBusy = auth.busy)
+                    IncidentJournalScreen(
+                        viewModel = journal,
+                        userId = profile.id,
+                        token = token,
+                        photos = photos,
+                        onSessionExpired = auth::expireSession,
+                        sessionBusy = auth.busy
+                    )
                 }
             }
         }
@@ -167,11 +178,14 @@ private fun SecureNoteApp(
 private fun IncidentJournalScreen(
     viewModel: RemoteJournalViewModel,
     userId: Int,
+    token: String,
+    photos: IncidentPhotoViewModel,
+    onSessionExpired: (String) -> Unit,
     sessionBusy: Boolean = false
 ) {
     val context = LocalContext.current
     val incidents = viewModel.incidents
-    val busy = viewModel.busy || sessionBusy
+    val busy = viewModel.busy || sessionBusy || photos.busy || photos.cameraPending
     var selectedId by rememberSaveable { mutableStateOf<Int?>(null) }
     var editorOpen by rememberSaveable { mutableStateOf(false) }
     val journalStateHolder = rememberSaveableStateHolder()
@@ -209,6 +223,10 @@ private fun IncidentJournalScreen(
             IncidentDetails(
                 incident = selectedIncident,
                 photoOwnerId = userId,
+                token = token,
+                photos = photos,
+                onSessionExpired = onSessionExpired,
+                onPhotoChanged = viewModel::refresh,
                 onBack = { viewModel.clearMessage(); selectedId = null },
                 onEdit = { viewModel.clearMessage(); editorOpen = true },
                 onDelete = { viewModel.deleteIncident(selectedIncident.id) },
@@ -500,6 +518,10 @@ private fun IncidentList(
 private fun IncidentDetails(
     incident: Incident,
     photoOwnerId: Int,
+    token: String,
+    photos: IncidentPhotoViewModel,
+    onSessionExpired: (String) -> Unit,
+    onPhotoChanged: () -> Unit,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -535,6 +557,10 @@ private fun IncidentDetails(
             PhotoCaptureCard(
                 ownerId = photoOwnerId,
                 incidentId = incident.id,
+                token = token,
+                viewModel = photos,
+                onSessionExpired = onSessionExpired,
+                onPhotoChanged = onPhotoChanged,
                 enabled = !busy
             )
 

@@ -15,12 +15,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -40,19 +43,19 @@ import kotlinx.coroutines.withContext
 
 class SecureNoteFileProvider : FileProvider()
 
-// Первый этап: локальный снимок. Загрузка в backend добавляется отдельно.
 @Composable
 fun PhotoCaptureCard(
     ownerId: Int,
     incidentId: Int,
+    token: String,
+    viewModel: IncidentPhotoViewModel,
+    onSessionExpired: (String) -> Unit,
+    onPhotoChanged: () -> Unit,
     enabled: Boolean = true
 ) {
     val context = LocalContext.current
     val directory = remember(ownerId, incidentId) {
         incidentPhotoDirectory(context, ownerId, incidentId)
-    }
-    var photoPath by rememberSaveable(ownerId, incidentId) {
-        mutableStateOf(findLocalPhoto(directory)?.absolutePath)
     }
     var pendingPath by rememberSaveable(ownerId, incidentId) {
         mutableStateOf<String?>(null)
@@ -60,13 +63,22 @@ fun PhotoCaptureCard(
     var notice by rememberSaveable(ownerId, incidentId) {
         mutableStateOf<String?>(null)
     }
+    var confirmDelete by rememberSaveable(ownerId, incidentId) {
+        mutableStateOf(false)
+    }
+
+    LaunchedEffect(ownerId, incidentId, token) {
+        viewModel.bind(ownerId, incidentId, token, onSessionExpired, onPhotoChanged)
+    }
+    val bound = viewModel.matches(ownerId, incidentId, token)
+    val canAct = bound && enabled && !viewModel.busy && !viewModel.cameraPending
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         val capturedPath = pendingPath
         pendingPath = null
-
+        viewModel.setCameraPending(ownerId, incidentId, token, false)
         if (capturedPath != null) {
             val draft = File(capturedPath)
             try {
@@ -77,27 +89,22 @@ fun PhotoCaptureCard(
                     draft.delete()
                     notice = "Камера не сохранила корректную фотографию. Попробуйте ещё раз."
                 } else {
-                    // Старый снимок удаляется только после сохранения нового.
                     val saved = File(directory, "photo_${UUID.randomUUID()}.jpg")
-                    check(draft.renameTo(saved)) { "Photo rename failed" }
-                    photoPath = saved.absolutePath
+                    check(draft.renameTo(saved))
+                    viewModel.acceptDraft(ownerId, incidentId, token, saved.absolutePath)
                     notice = null
-                    directory.listFiles()?.filter {
-                        it.name.startsWith("photo_") && it != saved
-                    }?.forEach { it.delete() }
                 }
             } catch (_: Exception) {
                 draft.delete()
-                notice = "Не удалось сохранить снимок. Предыдущая фотография не заменена."
+                notice = "Не удалось сохранить новый снимок. Предыдущая фотография не заменена."
             }
         }
     }
 
-    val currentPath = photoPath
-    val preview by produceState(
-        initialValue = LocalPhotoPreview(),
-        key1 = currentPath
-    ) {
+    val draftPath = if (bound) viewModel.draftPath else null
+    val serverInfo = if (bound) viewModel.serverInfo else null
+    val currentPath = draftPath ?: if (bound) viewModel.serverPath else null
+    val preview by produceState(initialValue = LocalPhotoPreview(), key1 = currentPath) {
         value = LocalPhotoPreview(loading = currentPath != null)
         if (currentPath != null) {
             val bitmap = withContext(Dispatchers.IO) {
@@ -105,7 +112,7 @@ fun PhotoCaptureCard(
             }
             value = LocalPhotoPreview(
                 bitmap = bitmap,
-                error = if (bitmap == null) "Не удалось открыть фотографию. Сделайте новый снимок." else null
+                error = if (bitmap == null) "Не удалось открыть фотографию. Обновите её или сделайте новый снимок." else null
             )
         }
     }
@@ -116,10 +123,10 @@ fun PhotoCaptureCard(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("Фотография", style = MaterialTheme.typography.titleMedium)
-
-            if (currentPath == null) {
-                Text("Фотография ещё не сделана.")
-            } else {
+            if (!bound || (viewModel.busy && !viewModel.loaded && draftPath == null)) {
+                CircularProgressIndicator()
+                Text("Получаем фотографию…")
+            } else if (currentPath != null) {
                 when {
                     preview.loading -> CircularProgressIndicator()
                     preview.bitmap != null -> Image(
@@ -130,13 +137,30 @@ fun PhotoCaptureCard(
                     )
                 }
                 preview.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Text(
-                    "Снимок сохранён на устройстве. На сервер пока не загружен.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            } else if (viewModel.loaded && serverInfo == null) {
+                Text("Фотография ещё не добавлена.")
+            } else if (!viewModel.busy) {
+                Text("Не удалось получить фотографию. Нажмите «Обновить фото».")
             }
 
+            if (bound) {
+                if (draftPath != null) {
+                    Text(
+                        if (serverInfo == null) "Новый снимок ещё не загружен."
+                        else "Новый снимок ещё не загружен. После загрузки он заменит сохранённую фотографию.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (serverInfo != null) {
+                    Text(
+                        "Фотография сохранена на сервере.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                viewModel.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                viewModel.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            }
             notice?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
             Button(
@@ -148,50 +172,92 @@ fun PhotoCaptureCard(
                         val created = File.createTempFile("draft_", ".jpg", directory)
                         draft = created
                         val uri = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
-                            created
+                            context, "${context.packageName}.fileprovider", created
                         )
                         pendingPath = created.absolutePath
+                        viewModel.setCameraPending(ownerId, incidentId, token, true)
                         launcher.launch(uri)
                     } catch (_: ActivityNotFoundException) {
                         draft?.delete()
                         pendingPath = null
+                        viewModel.setCameraPending(ownerId, incidentId, token, false)
                         notice = "Приложение камеры недоступно. Инцидент можно использовать без фотографии."
                     } catch (_: SecurityException) {
                         draft?.delete()
                         pendingPath = null
+                        viewModel.setCameraPending(ownerId, incidentId, token, false)
                         notice = "Не удалось открыть камеру: доступ запрещён."
                     } catch (_: Exception) {
                         draft?.delete()
                         pendingPath = null
+                        viewModel.setCameraPending(ownerId, incidentId, token, false)
                         notice = "Не удалось подготовить съёмку. Попробуйте ещё раз."
                     }
                 },
-                enabled = enabled && pendingPath == null,
+                enabled = canAct && pendingPath == null,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (currentPath == null) "Сделать фото" else "Переснять")
+                Text(if (draftPath != null || serverInfo != null) "Переснять" else "Сделать фото")
             }
 
-            if (currentPath != null) {
-                OutlinedButton(
-                    onClick = {
-                        val file = File(currentPath)
-                        if (!file.exists() || file.delete()) {
-                            photoPath = null
-                            notice = null
-                        } else {
-                            notice = "Не удалось удалить снимок. Попробуйте ещё раз."
-                        }
-                    },
-                    enabled = enabled && pendingPath == null,
+            if (draftPath != null) {
+                Button(
+                    onClick = { notice = null; viewModel.uploadDraft() },
+                    enabled = canAct,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Удалить снимок")
+                    Text(if (viewModel.busy) "Подождите…" else "Загрузить фото")
+                }
+                OutlinedButton(
+                    onClick = { notice = null; viewModel.discardDraft() },
+                    enabled = canAct,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Отменить новый снимок")
+                }
+            }
+
+            OutlinedButton(
+                onClick = { notice = null; viewModel.refresh() },
+                enabled = canAct,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (bound && viewModel.busy) "Подождите…" else "Обновить фото")
+            }
+
+            if (serverInfo != null) {
+                OutlinedButton(
+                    onClick = { confirmDelete = true },
+                    enabled = canAct,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Удалить фото с сервера", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
+    }
+
+    if (confirmDelete && bound && serverInfo != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Удалить фотографию?") },
+            text = { Text("Сохранённая фотография будет удалена из инцидента.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        notice = null
+                        viewModel.deleteServerPhoto()
+                    },
+                    enabled = canAct
+                ) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Отмена") }
+            }
+        )
     }
 }
 
@@ -201,12 +267,12 @@ private data class LocalPhotoPreview(
     val error: String? = null
 )
 
-private fun incidentPhotoDirectory(context: Context, ownerId: Int, incidentId: Int): File {
+internal fun incidentPhotoDirectory(context: Context, ownerId: Int, incidentId: Int): File {
     require(ownerId > 0 && incidentId > 0)
     return File(context.cacheDir, "photos/user_$ownerId/incident_$incidentId")
 }
 
-private fun findLocalPhoto(directory: File): File? =
+internal fun findLocalPhoto(directory: File): File? =
     directory.listFiles()?.filter {
         it.isFile && it.name.startsWith("photo_") && it.extension == "jpg"
     }?.maxByOrNull { it.lastModified() }
@@ -215,7 +281,7 @@ internal fun deleteIncidentPhotoDrafts(context: Context, ownerId: Int, incidentI
     incidentPhotoDirectory(context, ownerId, incidentId).deleteRecursively()
 }
 
-private fun isReadablePhoto(file: File): Boolean {
+internal fun isReadablePhoto(file: File): Boolean {
     if (!file.isFile || file.length() == 0L) return false
     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.absolutePath, options)

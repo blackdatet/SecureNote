@@ -2,6 +2,8 @@ package ru.mirea.securenote
 
 import com.google.gson.annotations.SerializedName
 import okhttp3.OkHttpClient
+import okhttp3.MultipartBody
+import okhttp3.ResponseBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -11,6 +13,9 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.DELETE
 import retrofit2.http.Path
+import retrofit2.http.Multipart
+import retrofit2.http.Part
+import retrofit2.http.Streaming
 import java.util.concurrent.TimeUnit
 
 data class BackendHealthResponse(
@@ -74,6 +79,23 @@ data class IncidentResponse(
     }
 }
 
+data class PhotoInfoResponse(
+    @SerializedName("incident_id") val incidentId: Int,
+    @SerializedName("content_type") val contentType: String,
+    @SerializedName("size_bytes") val sizeBytes: Long,
+    val width: Int,
+    val height: Int,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("updated_at") val updatedAt: String
+) {
+    fun validate(expectedIncidentId: Int) {
+        check(incidentId == expectedIncidentId && contentType == "image/jpeg")
+        check(sizeBytes in 1L..(10L * 1024 * 1024))
+        check(width > 0 && height > 0 && width.toLong() * height <= 20_000_000)
+        check(createdAt.isNotBlank() && updatedAt.isNotBlank())
+    }
+}
+
 interface BackendApi {
     @GET("health")
     suspend fun health(): BackendHealthResponse
@@ -120,6 +142,33 @@ interface BackendApi {
 
     @DELETE("incidents/{id}")
     suspend fun deleteIncident(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int
+    )
+
+    @GET("incidents/{id}/photo/info")
+    suspend fun photoInfo(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int
+    ): retrofit2.Response<PhotoInfoResponse>
+
+    @Multipart
+    @PUT("incidents/{id}/photo")
+    suspend fun uploadPhoto(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int,
+        @Part file: MultipartBody.Part
+    ): PhotoInfoResponse
+
+    @Streaming
+    @GET("incidents/{id}/photo")
+    suspend fun photo(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int
+    ): ResponseBody
+
+    @DELETE("incidents/{id}/photo")
+    suspend fun deletePhoto(
         @Header("Authorization") authorization: String,
         @Path("id") id: Int
     )
