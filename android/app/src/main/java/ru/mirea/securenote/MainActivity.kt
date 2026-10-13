@@ -44,16 +44,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val journalViewModel =
-            ViewModelProvider(this)[JournalViewModel::class.java]
+        val authViewModel =
+            ViewModelProvider(this)[AuthViewModel::class.java]
 
         setContent {
             SecureNoteTheme {
-                IncidentJournalScreen(
-                    incidents = journalViewModel.incidents,
-                    onSaveIncident = journalViewModel::saveIncident,
-                    onDeleteIncident = journalViewModel::deleteIncident
-                )
+                AuthScreen(viewModel = authViewModel)
             }
         }
     }
