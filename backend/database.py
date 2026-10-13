@@ -55,4 +55,16 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS incidents_owner_id
             ON incidents(owner_id);
+
+            CREATE TABLE IF NOT EXISTS incident_photos (
+                incident_id INTEGER PRIMARY KEY,
+                storage_name TEXT NOT NULL UNIQUE,
+                content_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE
+            );
         """)

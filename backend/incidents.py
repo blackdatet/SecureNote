@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from auth import CurrentSession, get_current_session
 from database import connect_db
+from photos import remove_photo_file
 
 
 router = APIRouter(prefix="/incidents", tags=["Инциденты"])
@@ -118,10 +119,19 @@ def update_incident(
                summary="Удаление своей записи")
 def delete_incident(incident_id: int, session: Session) -> Response:
     with connect_db() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        photo = connection.execute(
+            """SELECT incident_photos.storage_name FROM incident_photos
+            JOIN incidents ON incidents.id = incident_photos.incident_id
+            WHERE incidents.id = ? AND incidents.owner_id = ?""",
+            (incident_id, session.user_id),
+        ).fetchone()
         cursor = connection.execute(
             "DELETE FROM incidents WHERE id = ? AND owner_id = ?",
             (incident_id, session.user_id),
         )
         if cursor.rowcount == 0:
             raise not_found()
+    if photo is not None:
+        remove_photo_file(photo["storage_name"])
     return Response(status_code=204)
