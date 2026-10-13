@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -155,7 +156,7 @@ private fun SecureNoteApp(
                 }
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                    IncidentJournalScreen(journal, auth.busy)
+                    IncidentJournalScreen(viewModel = journal, userId = profile.id, sessionBusy = auth.busy)
                 }
             }
         }
@@ -163,7 +164,12 @@ private fun SecureNoteApp(
 }
 
 @Composable
-private fun IncidentJournalScreen(viewModel: RemoteJournalViewModel, sessionBusy: Boolean = false) {
+private fun IncidentJournalScreen(
+    viewModel: RemoteJournalViewModel,
+    userId: Int,
+    sessionBusy: Boolean = false
+) {
+    val context = LocalContext.current
     val incidents = viewModel.incidents
     val busy = viewModel.busy || sessionBusy
     var selectedId by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -182,6 +188,7 @@ private fun IncidentJournalScreen(viewModel: RemoteJournalViewModel, sessionBusy
     val deletedId = viewModel.deletedIncidentId
     LaunchedEffect(deletedId) {
         if (deletedId != null) {
+            deleteIncidentPhotoDrafts(context, userId, deletedId)
             selectedId = null
             editorOpen = false
             viewModel.acknowledgeDelete()
@@ -201,6 +208,7 @@ private fun IncidentJournalScreen(viewModel: RemoteJournalViewModel, sessionBusy
         selectedIncident != null -> {
             IncidentDetails(
                 incident = selectedIncident,
+                photoOwnerId = userId,
                 onBack = { viewModel.clearMessage(); selectedId = null },
                 onEdit = { viewModel.clearMessage(); editorOpen = true },
                 onDelete = { viewModel.deleteIncident(selectedIncident.id) },
@@ -491,6 +499,7 @@ private fun IncidentList(
 @Composable
 private fun IncidentDetails(
     incident: Incident,
+    photoOwnerId: Int,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -522,6 +531,12 @@ private fun IncidentDetails(
             Card(modifier = Modifier.fillMaxWidth()) {
                 IncidentContent(incident = incident, compact = false)
             }
+
+            PhotoCaptureCard(
+                ownerId = photoOwnerId,
+                incidentId = incident.id,
+                enabled = !busy
+            )
 
             serverError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
