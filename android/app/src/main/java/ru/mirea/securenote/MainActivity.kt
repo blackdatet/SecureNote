@@ -1,6 +1,16 @@
 package ru.mirea.securenote
 
 import android.os.Bundle
+import java.time.format.DateTimeFormatter
+import java.time.ZoneId
+import java.time.Instant
+import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -34,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import ru.mirea.securenote.ui.theme.SecureNoteTheme
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -47,9 +56,12 @@ class MainActivity : ComponentActivity() {
         val authViewModel =
             ViewModelProvider(this)[AuthViewModel::class.java]
 
+        val journalViewModel =
+            ViewModelProvider(this)[RemoteJournalViewModel::class.java]
+
         setContent {
             SecureNoteTheme {
-                AuthScreen(viewModel = authViewModel)
+                SecureNoteApp(authViewModel, journalViewModel)
             }
         }
     }
@@ -61,7 +73,9 @@ data class Incident(
     val description: String,
     val category: String,
     val severity: String,
-    val status: String
+    val status: String,
+    val createdAt: String? = null,
+    val updatedAt: String? = null
 )
 
 private val demoIncidents = listOf(
@@ -94,87 +108,128 @@ private val demoIncidents = listOf(
     )
 )
 
-// Временное хранение в памяти до подключения backend.
-class JournalViewModel : ViewModel() {
-    var incidents by mutableStateOf(demoIncidents)
-        private set
+@Composable
+private fun SecureNoteApp(
+    auth: AuthViewModel,
+    journal: RemoteJournalViewModel
+) {
+    val profile = auth.user
+    val token = auth.accessToken
 
-    private var nextId = (demoIncidents.maxOfOrNull { it.id } ?: 0) + 1
-
-    fun saveIncident(incident: Incident) {
-        if (incident.title.isBlank() || incident.description.isBlank()) return
-
-        val cleanedIncident = incident.copy(
-            title = incident.title.trim().take(120),
-            description = incident.description.trim().take(2000)
-        )
-
-        if (incident.id == 0) {
-            val newIncident = cleanedIncident.copy(
-                id = nextId++,
-                status = "Новый"
-            )
-            incidents = listOf(newIncident) + incidents
-        } else {
-            incidents = incidents.map { existing ->
-                if (existing.id == incident.id) cleanedIncident else existing
-            }
-        }
+    if (profile == null || token == null) {
+        LaunchedEffect(Unit) { journal.clearSession() }
+        AuthScreen(viewModel = auth)
+        return
     }
 
-    fun deleteIncident(id: Int) {
-        incidents = incidents.filterNot { it.id == id }
+    key(profile.id, token) {
+        LaunchedEffect(token) {
+            journal.bindSession(token, auth::expireSession)
+        }
+
+        if (!journal.isBoundTo(token)) {
+            Scaffold { padding ->
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else {
+            Scaffold(
+                topBar = {
+                    Column(
+                        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(profile.email, modifier = Modifier.weight(1f), maxLines = 2)
+                            TextButton(onClick = auth::logout, enabled = !auth.busy && !journal.busy) {
+                                Text(if (auth.busy) "Выходим…" else "Выйти")
+                            }
+                        }
+                        auth.message?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
+                    IncidentJournalScreen(journal, auth.busy)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun IncidentJournalScreen(
-    incidents: List<Incident>,
-    onSaveIncident: (Incident) -> Unit,
-    onDeleteIncident: (Int) -> Unit
-) {
+private fun IncidentJournalScreen(viewModel: RemoteJournalViewModel, sessionBusy: Boolean = false) {
+    val incidents = viewModel.incidents
+    val busy = viewModel.busy || sessionBusy
     var selectedId by rememberSaveable { mutableStateOf<Int?>(null) }
     var editorOpen by rememberSaveable { mutableStateOf(false) }
-
     val journalStateHolder = rememberSaveableStateHolder()
     val selectedIncident = incidents.firstOrNull { it.id == selectedId }
+
+    val savedId = viewModel.savedIncidentId
+    LaunchedEffect(savedId) {
+        if (savedId != null) {
+            editorOpen = false
+            selectedId = savedId
+            viewModel.acknowledgeSave()
+        }
+    }
+    val deletedId = viewModel.deletedIncidentId
+    LaunchedEffect(deletedId) {
+        if (deletedId != null) {
+            selectedId = null
+            editorOpen = false
+            viewModel.acknowledgeDelete()
+        }
+    }
 
     when {
         editorOpen && (selectedId == null || selectedIncident != null) -> {
             IncidentForm(
                 initialIncident = selectedIncident,
-                onCancel = { editorOpen = false },
-                onSave = { incident ->
-                    onSaveIncident(incident)
-                    editorOpen = false
-                }
+                onCancel = { viewModel.clearMessage(); editorOpen = false },
+                onSave = viewModel::saveIncident,
+                busy = busy,
+                serverError = viewModel.message
             )
         }
-
         selectedIncident != null -> {
             IncidentDetails(
                 incident = selectedIncident,
-                onBack = { selectedId = null },
-                onEdit = { editorOpen = true },
-                onDelete = {
-                    onDeleteIncident(selectedIncident.id)
-                    selectedId = null
-                }
+                onBack = { viewModel.clearMessage(); selectedId = null },
+                onEdit = { viewModel.clearMessage(); editorOpen = true },
+                onDelete = { viewModel.deleteIncident(selectedIncident.id) },
+                busy = busy,
+                serverError = viewModel.message
             )
         }
-
         else -> {
             journalStateHolder.SaveableStateProvider("journal") {
                 IncidentList(
                     incidents = incidents,
                     onOpen = { id ->
-                        selectedId = id
-                        editorOpen = false
+                        if (!busy) {
+                            viewModel.clearMessage()
+                            selectedId = id
+                            editorOpen = false
+                        }
                     },
                     onCreate = {
-                        selectedId = null
-                        editorOpen = true
-                    }
+                        if (!busy && viewModel.loaded) {
+                            viewModel.clearMessage()
+                            selectedId = null
+                            editorOpen = true
+                        }
+                    },
+                    busy = busy,
+                    loaded = viewModel.loaded,
+                    serverError = viewModel.message,
+                    onRefresh = viewModel::refresh
                 )
             }
         }
@@ -185,7 +240,11 @@ private fun IncidentJournalScreen(
 private fun IncidentList(
     incidents: List<Incident>,
     onOpen: (Int) -> Unit,
-    onCreate: () -> Unit
+    onCreate: () -> Unit,
+    busy: Boolean = false,
+    loaded: Boolean = true,
+    serverError: String? = null,
+    onRefresh: (() -> Unit)? = null
 ) {
     var categoryFilter by rememberSaveable { mutableStateOf("Все") }
     var severityFilter by rememberSaveable { mutableStateOf("Все") }
@@ -220,7 +279,7 @@ private fun IncidentList(
         modifier = Modifier.fillMaxSize(),
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = onCreate) {
-                Text("+ Новая запись")
+                Text(if (busy) "Подождите…" else if (!loaded) "Сначала загрузите журнал" else "+ Новая запись")
             }
         }
     ) { innerPadding ->
@@ -237,9 +296,6 @@ private fun IncidentList(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                BackendConnectionCard()
-            }
-            item {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -253,12 +309,27 @@ private fun IncidentList(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Тестовый режим: записи хранятся в памяти",
+                        text = "Личный журнал",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+
+            if (onRefresh != null) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onRefresh, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (busy) "Загрузка…" else "Обновить журнал")
+                        }
+                        if (serverError != null) {
+                            Text(serverError, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+
+            if (!loaded) return@LazyColumn
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -422,11 +493,13 @@ private fun IncidentDetails(
     incident: Incident,
     onBack: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    busy: Boolean = false,
+    serverError: String? = null
 ) {
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
-    BackHandler(onBack = onBack)
+    BackHandler { if (!busy) onBack() }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -437,7 +510,7 @@ private fun IncidentDetails(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            TextButton(onClick = onBack) {
+            TextButton(onClick = onBack, enabled = !busy) {
                 Text("Назад к журналу")
             }
 
@@ -450,8 +523,11 @@ private fun IncidentDetails(
                 IncidentContent(incident = incident, compact = false)
             }
 
+            serverError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
             Button(
                 onClick = onEdit,
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Редактировать")
@@ -459,10 +535,11 @@ private fun IncidentDetails(
 
             OutlinedButton(
                 onClick = { confirmDelete = true },
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Удалить запись",
+                    text = if (busy) "Подождите…" else "Удалить запись",
                     color = MaterialTheme.colorScheme.error
                 )
             }
@@ -481,7 +558,8 @@ private fun IncidentDetails(
                     onClick = {
                         confirmDelete = false
                         onDelete()
-                    }
+                    },
+                    enabled = !busy
                 ) {
                     Text(
                         text = "Удалить",
@@ -536,8 +614,19 @@ private fun IncidentContent(incident: Incident, compact: Boolean) {
             text = "Статус: ${incident.status}",
             style = MaterialTheme.typography.bodyMedium
         )
+        if (!compact && incident.createdAt != null) {
+            Text("Создан: ${formatIncidentDate(incident.createdAt)}", style = MaterialTheme.typography.bodySmall)
+        }
+        if (!compact && incident.updatedAt != null && incident.updatedAt != incident.createdAt) {
+            Text("Изменён: ${formatIncidentDate(incident.updatedAt)}", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
+
+private fun formatIncidentDate(value: String): String = try {
+    DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+        .withZone(ZoneId.systemDefault()).format(Instant.parse(value))
+} catch (_: Exception) { value }
 
 @Preview(showBackground = true)
 @Composable

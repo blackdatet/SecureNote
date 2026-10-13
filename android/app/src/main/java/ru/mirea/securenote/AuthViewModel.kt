@@ -29,6 +29,13 @@ class AuthViewModel : ViewModel() {
         if (!busy) message = null
     }
 
+    fun expireSession(expectedToken: String) {
+        if (accessToken != expectedToken) return
+        user = null
+        accessToken = null
+        message = "Сессия истекла. Войди повторно."
+    }
+
     fun authenticate(
         email: String,
         password: String,

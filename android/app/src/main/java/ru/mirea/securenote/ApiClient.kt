@@ -8,6 +8,9 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.DELETE
+import retrofit2.http.Path
 import java.util.concurrent.TimeUnit
 
 data class BackendHealthResponse(
@@ -36,6 +39,41 @@ data class AuthTokenResponse(
     val expiresIn: Int
 )
 
+data class IncidentCreateRequest(
+    val title: String,
+    val description: String,
+    val category: String,
+    val severity: String
+)
+
+data class IncidentUpdateRequest(
+    val title: String,
+    val description: String,
+    val category: String,
+    val severity: String,
+    val status: String
+)
+
+data class IncidentResponse(
+    val id: Int,
+    val title: String,
+    val description: String,
+    val category: String,
+    val severity: String,
+    val status: String,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("updated_at") val updatedAt: String
+) {
+    fun toIncident(): Incident {
+        check(id > 0 && title.isNotBlank() && description.isNotBlank())
+        check(category in listOf("Фишинг", "Подозрительный вход", "Утечка данных", "Другое"))
+        check(severity in listOf("Низкий", "Средний", "Высокий"))
+        check(status in listOf("Новый", "В работе", "Закрыт"))
+        check(createdAt.isNotBlank() && updatedAt.isNotBlank())
+        return Incident(id, title, description, category, severity, status, createdAt, updatedAt)
+    }
+}
+
 interface BackendApi {
     @GET("health")
     suspend fun health(): BackendHealthResponse
@@ -55,6 +93,36 @@ interface BackendApi {
     suspend fun logout(
         @Header("Authorization") authorization: String
     )
+
+    @GET("incidents")
+    suspend fun incidents(
+        @Header("Authorization") authorization: String
+    ): List<IncidentResponse>
+
+    @GET("incidents/{id}")
+    suspend fun incident(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int
+    ): IncidentResponse
+
+    @POST("incidents")
+    suspend fun createIncident(
+        @Header("Authorization") authorization: String,
+        @Body request: IncidentCreateRequest
+    ): IncidentResponse
+
+    @PUT("incidents/{id}")
+    suspend fun updateIncident(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int,
+        @Body request: IncidentUpdateRequest
+    ): IncidentResponse
+
+    @DELETE("incidents/{id}")
+    suspend fun deleteIncident(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: Int
+    )
 }
 
 object ApiClient {
@@ -65,7 +133,22 @@ object ApiClient {
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .callTimeout(15, TimeUnit.SECONDS)
+            .connectionPool(
+                okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS)
+            )
             .retryOnConnectionFailure(false)
+            .eventListener(object : okhttp3.EventListener() {
+                override fun callFailed(
+                    call: okhttp3.Call,
+                    ioe: java.io.IOException
+                ) {
+                    android.util.Log.w(
+                        "SecureNoteNetwork",
+                        "Ошибка подключения к backend",
+                        ioe
+                    )
+                }
+            })
             .build()
 
         Retrofit.Builder()

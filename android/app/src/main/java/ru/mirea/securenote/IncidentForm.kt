@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.dp
 fun IncidentForm(
     initialIncident: Incident?,
     onCancel: () -> Unit,
-    onSave: (Incident) -> Unit
+    onSave: (Incident) -> Unit,
+    busy: Boolean = false,
+    serverError: String? = null
 ) {
     val editing = initialIncident != null
 
@@ -58,7 +60,7 @@ fun IncidentForm(
     val titleError = attemptedSave && title.isBlank()
     val descriptionError = attemptedSave && description.isBlank()
 
-    BackHandler(onBack = onCancel)
+    BackHandler { if (!busy) onCancel() }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         Column(
@@ -70,7 +72,7 @@ fun IncidentForm(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            TextButton(onClick = onCancel) {
+            TextButton(onClick = onCancel, enabled = !busy) {
                 Text("Отмена")
             }
 
@@ -85,6 +87,7 @@ fun IncidentForm(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Название") },
                 singleLine = true,
+                enabled = !busy,
                 isError = titleError,
                 supportingText = {
                     Text(
@@ -101,6 +104,7 @@ fun IncidentForm(
                 label = { Text("Описание события") },
                 minLines = 4,
                 maxLines = 8,
+                enabled = !busy,
                 isError = descriptionError,
                 supportingText = {
                     Text(
@@ -119,14 +123,16 @@ fun IncidentForm(
                     "Утечка данных",
                     "Другое"
                 ),
-                onSelected = { category = it }
+                onSelected = { category = it },
+                enabled = !busy
             )
 
             IncidentChoice(
                 label = "Уровень опасности",
                 selected = severity,
                 options = listOf("Низкий", "Средний", "Высокий"),
-                onSelected = { severity = it }
+                onSelected = { severity = it },
+                enabled = !busy
             )
 
             if (editing) {
@@ -134,7 +140,8 @@ fun IncidentForm(
                     label = "Статус",
                     selected = status,
                     options = listOf("Новый", "В работе", "Закрыт"),
-                    onSelected = { status = it }
+                    onSelected = { status = it },
+                    enabled = !busy
                 )
             } else {
                 Text(
@@ -144,7 +151,10 @@ fun IncidentForm(
                 )
             }
 
+            serverError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
             Button(
+                enabled = !busy,
                 onClick = {
                     attemptedSave = true
 
@@ -164,7 +174,8 @@ fun IncidentForm(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    if (editing) "Сохранить изменения"
+                    if (busy) "Сохраняем…"
+                    else if (editing) "Сохранить изменения"
                     else "Добавить в журнал"
                 )
             }
@@ -177,7 +188,8 @@ fun IncidentChoice(
     label: String,
     selected: String,
     options: List<String>,
-    onSelected: (String) -> Unit
+    onSelected: (String) -> Unit,
+    enabled: Boolean = true
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -190,13 +202,14 @@ fun IncidentChoice(
         Box(modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { expanded = true },
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("$selected ▾")
             }
 
             DropdownMenu(
-                expanded = expanded,
+                expanded = expanded && enabled,
                 onDismissRequest = { expanded = false }
             ) {
                 options.forEach { option ->
