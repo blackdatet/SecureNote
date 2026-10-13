@@ -32,6 +32,8 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
         private set
     var busy by mutableStateOf(false)
         private set
+    var operationLabel by mutableStateOf<String?>(null)
+        private set
     var cameraPending by mutableStateOf(false)
         private set
     var message by mutableStateOf<String?>(null)
@@ -78,6 +80,7 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
         draftPath = null
         loaded = false
         busy = false
+        operationLabel = null
         cameraPending = false
         message = null
         notice = null
@@ -113,7 +116,7 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun refresh() {
-        runRequest { current ->
+        runRequest(label = "Обновляем фотографию…") { current ->
             val response = ApiClient.api.photoInfo("Bearer ${current.token}", current.incidentId)
             if (!response.isSuccessful) throw HttpException(response)
             val info = response.body()
@@ -149,7 +152,7 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
         }
 
         var uploadConfirmed = false
-        runRequest(failurePrefix = {
+        runRequest(label = "Загружаем фотографию…", failurePrefix = {
             if (uploadConfirmed) "Фотография уже загружена. Не удалось обновить её отображение. " else ""
         }) { current ->
             val part = MultipartBody.Part.createFormData(
@@ -172,13 +175,14 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
             onChanged?.invoke()
 
             // Получаем именно сохранённый backend JPEG. При сбое остаётся локальное отображение.
+            operationLabel = "Получаем сохранённую фотографию…"
             downloadPhoto(current)
         }
     }
 
     fun deleteServerPhoto() {
         if (serverInfo == null) return
-        runRequest { current ->
+        runRequest(label = "Удаляем фотографию…") { current ->
             ApiClient.api.deletePhoto("Bearer ${current.token}", current.incidentId)
             if (scope == current) {
                 serverPath?.let { File(it).delete() }
@@ -233,12 +237,14 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun runRequest(
+        label: String,
         failurePrefix: () -> String = { "" },
         action: suspend (PhotoScope) -> Unit
     ) {
         val current = scope ?: return
         if (busy || cameraPending) return
         busy = true
+        operationLabel = label
         message = null
         notice = null
         requestJob = viewModelScope.launch {
@@ -267,7 +273,10 @@ class IncidentPhotoViewModel(application: Application) : AndroidViewModel(applic
                     }
                 }
             } finally {
-                if (scope == current) busy = false
+                if (scope == current) {
+                    busy = false
+                    operationLabel = null
+                }
             }
         }
     }
