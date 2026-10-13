@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -157,6 +158,12 @@ fun PhotoCaptureCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Text(
+                        "JPEG · ${serverInfo.width} × ${serverInfo.height} пикс. · " +
+                            formatPhotoSize(serverInfo.sizeBytes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 viewModel.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 viewModel.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
@@ -259,6 +266,12 @@ fun PhotoCaptureCard(
             }
         )
     }
+}
+
+private fun formatPhotoSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes Б"
+    bytes < 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f КиБ", bytes / 1024.0)
+    else -> String.format(Locale.getDefault(), "%.1f МиБ", bytes / (1024.0 * 1024.0))
 }
 
 private data class LocalPhotoPreview(
